@@ -13,23 +13,31 @@ end
 
 app_dir = node['rails-lastmile']['app_dir']
 
-include_recipe "rails-lastmile::setup"
+service "errata" do
+  provider Chef::Provider::Service::Upstart
+  supports :restart => true
+end
 
-include_recipe "nginx"
-include_recipe "unicorn"
-
-directory "/var/run/unicorn" do
+directory "/var/www/errata" do
   owner "root"
   group "root"
   mode "777"
+  recursive true
   action :create
 end
 
-file "/var/run/unicorn/master.pid" do
+template "/var/www/errata/index.html" do
   owner "root"
   group "root"
-  mode "666"
-  action :create_if_missing
+  mode  "644"
+  source "index.html"
+end
+
+template "/etc/Procfile" do
+  owner "root"
+  group "root"
+  mode  "644"
+  source "procfile.erb"
 end
 
 file "/var/log/unicorn.log" do
@@ -47,23 +55,51 @@ template "/etc/unicorn.cfg" do
   variables( :app_dir => app_dir)
 end
 
+template "/etc/environment" do
+  owner "root"
+  group "root"
+  mode "644"
+  source "environment.erb"
+  variables( :environment => node['rails-lastmile']['environment'])
+end
+
+directory "/root/.foreman/templates/upstart" do
+  owner "root"
+  group "root"
+  mode "777"
+  recursive true
+  action :create
+end
+
+template "/root/.foreman/templates/upstart/master.conf.erb" do
+  owner "root"
+  group "root"
+  mode "644"
+  source "master.conf.erb"
+end
+
 rbenv_script "run-rails" do
   rbenv_version node['rails-lastmile']['ruby_version']
   cwd app_dir
-  if node['rails-lastmile']['reset_db']
-    code <<-EOT1
-      bundle install
-      bundle exec rake db:drop
-      bundle exec rake db:setup
-      ps -p `cat /var/run/unicorn/master.pid` &>/dev/null || bundle exec unicorn -c /etc/unicorn.cfg -D --env #{node['rails-lastmile']['environment']}
-    EOT1
-  else
-    code <<-EOT2
-      bundle install
-      bundle exec rake db:migrate
-      ps -p `cat /var/run/unicorn/master.pid` &>/dev/null || bundle exec unicorn -c /etc/unicorn.cfg -D --env #{node['rails-lastmile']['environment']}
-    EOT2
-  end
+  code <<-EOT
+    bundle install
+    bundle exec rake db:migrate
+  EOT
+end
+
+bash "export-foreman" do
+  cwd app_dir
+  code <<-EOT
+    bundle exec foreman export upstart /etc/init -a errata -u root -d "/vagrant" -f "/etc/Procfile"
+  EOT
+  notifies :restart, "service[errata]"
+end
+
+template "/etc/init/errata-web.conf" do
+  owner "root"
+  group "root"
+  mode "644"
+  source "web.conf.erb"
 end
 
 template "/etc/nginx/sites-enabled/default" do
@@ -75,5 +111,4 @@ template "/etc/nginx/sites-enabled/default" do
   notifies :restart, "service[nginx]"
 end
 
-service "unicorn"
 service "nginx"
