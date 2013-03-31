@@ -5,5 +5,3 @@ description      "Sets up a server for rails"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
 version          "0.1.1"
 depends "nginx"
-depends "unicorn"
-depends "rbenv"
